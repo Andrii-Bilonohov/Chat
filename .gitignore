@@ -1,43 +1,127 @@
-# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
+#################################
+# ОС / Системные файлы и IDE
+#################################
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+desktop.ini
 
-# dependencies
+# Редакторы кода и IDE
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.swp
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.sublime-project
+*.sublime-workspace
+
+#################################
+# Логи и Кэш
+#################################
+*.log
+logs
+*.log*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
+.eslintcache
+.cache/
+
+#################################
+# Зависимости (Node, Python и др.)
+#################################
 node_modules/
+jspm_packages/
+web_modules/
+venv/
+.venv/
+env/
+lib/
+lib64/
 
-# Expo
-.expo/
+#################################
+# Сборка и Дистрибутивы (Build results)
+#################################
 dist/
+build/
+out/
+bin/
+obj/
 web-build/
+.next/
+.vuepress/.temp
+.vite/
+.expo/
 expo-env.d.ts
 
-# Native
-.kotlin/
-*.orig.*
+# Сгенерированные нативные папки в Expo/React Native
+/ios
+/android
+
+#################################
+# Ключи, сертификаты и нативные файлы
+#################################
 *.jks
 *.p8
 *.p12
 *.key
+*.pem
 *.mobileprovision
-
-# Metro
+*.orig.*
+.kotlin/
 .metro-health-check*
 
-# debug
-npm-debug.*
-yarn-debug.*
-yarn-error.*
-
-# macOS
-.DS_Store
-*.pem
-
-# local env files
+#################################
+# Конфиденциальные данные и Окружение (.env)
+#################################
+# Игнорируем файлы, содержащие РЕАЛЬНЫЕ секреты и локальные настройки
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
 .env*.local
+*.secrets.json
+secrets.json
 
-# typescript
-*.tsbuildinfo
+# ВАЖНО: Базовые файлы .env, .env.development, .env.production 
+# лучше НЕ добавлять в ignore, чтобы команда видела структуру ключей 
+# (например, EXPO_PUBLIC_CONVEX_URL). 
+# Если хотите скрыть ВСЕ .env файлы, раскомментируйте строку ниже:
+# .env*
 
-example
+#################################
+# Тесты и Покрытие кода
+#################################
+coverage/
+*.coverage
+*.coveragexml
+TestResults/
 
-# generated native folders
-/ios
-/android
+#################################
+# Docker & Развертывание
+#################################
+docker-compose.override.yml
+publish/
+wwwroot/lib/
+
+#################################
+# .NET / ASP.NET специфичное
+#################################
+*.rsuser
+*.dbmdl
+*.jfm
+_ReSharper*/
+*.DotSettings.user
+appsettings.Development.json
+appsettings.Local.json
+Migrations/*.Designer.cs
+*.db
+*.db-shm
+*.db-wal
