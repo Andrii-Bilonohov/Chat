@@ -125,3 +125,6 @@ Migrations/*.Designer.cs
 *.db
 *.db-shm
 *.db-wal
+
+.claude
+.vscode
