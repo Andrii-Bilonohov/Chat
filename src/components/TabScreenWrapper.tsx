@@ -1,16 +1,15 @@
-import { View, Platform } from "react-native";
-
-const TAB_BAR_HEIGHT = 64;
-const TAB_BAR_BOTTOM = Platform.OS === "ios" ? 30 : 16;
+import React from "react";
+import { View } from "react-native";
+import { TAB_BAR_SPACE } from "@/constants/layout";
+import { useKeyboardVisible } from "@/hooks/useKeyboardVisible";
 
 export function TabScreenWrapper({ children }: { children: React.ReactNode }) {
+    const keyboardVisible = useKeyboardVisible();
 
     return (
         <View
             className="flex-1 bg-surface"
-            style={{
-                paddingBottom: TAB_BAR_HEIGHT + TAB_BAR_BOTTOM + 12
-            }}
+            style={{ paddingBottom: keyboardVisible ? 0 : TAB_BAR_SPACE }}
         >
             {children}
         </View>

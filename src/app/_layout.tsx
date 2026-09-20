@@ -7,6 +7,7 @@ import { ActivityIndicator, Platform } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import "../../global.css";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 
 const secureStorage = {
   getItem: SecureStore.getItemAsync,
@@ -45,17 +46,18 @@ function MainLayout() {
 
   return (
     <SafeAreaView className="flex-1 bg-surface" edges={["top"]}>
-      <StatusBar style="light" />
-      <Stack
-        screenOptions={{
-          headerShown: false,
-        }}
-      >
-        <Stack.Screen name="(auth)" />
-        <Stack.Screen name="(tabs)" />
-        <Stack.Screen name="settings/[id]" />
-        <Stack.Screen name="chat/[id]" />
-      </Stack>
+        <StatusBar style="light" />
+        <Stack
+          screenOptions={{
+            headerShown: false,
+          }}
+        >
+          <Stack.Screen name="(auth)" />
+          <Stack.Screen name="(tabs)" />
+          <Stack.Screen name="settings/[id]" />
+          <Stack.Screen name="chat/[id]" />
+          <Stack.Screen name="user/[id]" />
+        </Stack>
     </SafeAreaView>
   );
 }
@@ -66,13 +68,15 @@ const convex = new ConvexReactClient(process.env.EXPO_PUBLIC_CONVEX_URL!, {
 
 export default function RootLayout() {
   return (
-    <SafeAreaProvider>
-      <ConvexAuthProvider
-        client={convex}
-        storage={Platform.OS === "web" ? undefined : secureStorage}
-      >
-        <MainLayout />
-      </ConvexAuthProvider>
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <ConvexAuthProvider
+          client={convex}
+          storage={Platform.OS === "web" ? undefined : secureStorage}
+        >
+          <MainLayout />
+        </ConvexAuthProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }

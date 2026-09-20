@@ -1,126 +1,146 @@
+import React, { useMemo, useState } from "react";
 import {
   View,
   Text,
+  TextInput,
   FlatList,
   TouchableOpacity,
-  RefreshControl,
   ActivityIndicator,
+  Alert,
 } from "react-native";
-import { useQuery } from "convex/react";
-import { api } from "../../../convex/_generated/api";
+import { useQuery, useMutation } from "convex/react";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { useState } from "react";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { api } from "../../../convex/_generated/api";
+import { Id } from "../../../convex/_generated/dataModel";
 import { COLORS } from "@/constants/theme";
-import { TabScreenWrapper } from "@/components/TabScreenWrapper";
+import { TAB_BAR_SPACE } from "@/constants/layout";
+import { SwipeableRoomItem } from "@/components/SwipeableRoomItem";
 
 export default function HomeScreen() {
   const router = useRouter();
-  const insets = useSafeAreaInsets();
-
   const rooms = useQuery(api.rooms.listRooms);
-  const [refreshing, setRefreshing] = useState(false);
+  const currentUser = useQuery(api.users.currentUser);
+  const deleteRoom = useMutation(api.rooms.deleteRoom);
 
-  const onRefresh = async () => {
-    setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 500);
+  const [search, setSearch] = useState("");
+
+  const visibleRooms = useMemo(() => {
+    if (!rooms) return [];
+    const q = search.trim().toLowerCase();
+    return rooms
+      .filter((r) => !q || r.title.toLowerCase().includes(q))
+      .sort(
+        (a, b) =>
+          (b.lastMessageAt ?? b._creationTime) - (a.lastMessageAt ?? a._creationTime)
+      );
+  }, [rooms, search]);
+
+  const handleDeleteRoom = (roomId: Id<"chatRooms">) => {
+    const room = rooms?.find((r) => r._id === roomId);
+    if (!room) return;
+
+    if (room.creatorId !== currentUser?._id) {
+      Alert.alert("Обмеження доступу", "Лише автор кімнати може її видалити.");
+      return;
+    }
+
+    Alert.alert(
+      "Видалити кімнату?",
+      `Кімната «${room.title}» та всі її повідомлення будуть видалені. Цю дію неможливо скасувати.`,
+      [
+        { text: "Скасувати", style: "cancel" },
+        {
+          text: "Видалити",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await deleteRoom({ roomId });
+            } catch (error) {
+              console.error(error);
+              Alert.alert("Помилка", "Не вдалося видалити кімнату");
+            }
+          },
+        },
+      ]
+    );
   };
 
+  const isLoading = rooms === undefined || currentUser === undefined;
+
   return (
-    <TabScreenWrapper>
-      <View
-        className="flex-row items-center justify-between px-4 py-3 bg-surface border-b border-surfaceLight"
-        style={{ paddingTop: Math.max(insets.top, 12) }}
-      >
-        <TouchableOpacity
-          onPress={() => router.push("/profile")}
-          className="w-9 h-9 rounded-full bg-secondary border border-surfaceLight items-center justify-center"
-          activeOpacity={0.8}
-        >
-          <Ionicons name="person" size={18} color={COLORS.primary} />
-        </TouchableOpacity>
+    <View className="flex-1 bg-surface">
 
-        <Text className="text-white text-lg font-semibold flex-1 text-center mx-3">
-          Кімнати
-        </Text>
-
-        <TouchableOpacity
-          onPress={() => router.push("/new-room")}
-          className="w-9 h-9 rounded-full bg-primary items-center justify-center"
-          activeOpacity={0.8}
-        >
-          <Ionicons name="add" size={22} color="#FFFFFF" />
-        </TouchableOpacity>
-      </View>
-
-      {rooms === undefined ? (
+      {isLoading ? (
         <View className="flex-1 justify-center items-center">
           <ActivityIndicator size="large" color={COLORS.primary} />
+          <Text className="text-textMuted text-sm mt-4">Завантаження кімнат...</Text>
         </View>
       ) : rooms.length === 0 ? (
-        <View className="flex-1 justify-center items-center px-6">
-          <View className="w-16 h-16 rounded-3xl bg-secondary items-center justify-center mb-4">
-            <Ionicons name="chatbubbles-outline" size={32} color={COLORS.textMuted} />
+        <View className="flex-1 justify-center items-center px-8" style={{ paddingBottom: TAB_BAR_SPACE }}>
+          <View className="w-20 h-20 rounded-3xl bg-secondary border border-surfaceLight items-center justify-center mb-5">
+            <Ionicons name="chatbubbles-outline" size={36} color={COLORS.textMuted} />
           </View>
-          <Text className="text-white text-lg font-bold text-center">
+          <Text className="text-white text-xl font-bold text-center mb-2">
             Немає активних кімнат
           </Text>
-          <Text className="text-textMuted text-sm text-center mt-1 mb-5">
-            Створіть першу кімнату, щоб почати спілкування
+          <Text className="text-textMuted text-sm text-center leading-5 mb-6">
+            Створіть першу кімнату та запросіть співрозмовників
           </Text>
           <TouchableOpacity
             onPress={() => router.push("/new-room")}
-            className="flex-row items-center gap-2 bg-primary px-5 py-3 rounded-2xl active:opacity-80"
-            activeOpacity={0.8}
+            activeOpacity={0.85}
+            className="flex-row items-center bg-primary px-5 py-3 rounded-full"
           >
             <Ionicons name="add" size={20} color="#FFFFFF" />
-            <Text className="text-white text-sm font-bold">Створити кімнату</Text>
+            <Text className="text-white font-semibold ml-1.5">Створити кімнату</Text>
           </TouchableOpacity>
         </View>
       ) : (
         <FlatList
-          data={rooms}
+          data={visibleRooms}
           keyExtractor={(item) => item._id}
-          contentContainerStyle={{ padding: 16, gap: 12 }}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={onRefresh}
-              tintColor={COLORS.primary}
-            />
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={{
+            paddingHorizontal: 16,
+            paddingTop: 12,
+            paddingBottom: TAB_BAR_SPACE,
+          }}
+          ListHeaderComponent={
+            <View className="flex-row items-center bg-secondary border border-surfaceLight rounded-2xl px-3 mb-4">
+              <Ionicons name="search" size={18} color={COLORS.textMuted} />
+              <TextInput
+                value={search}
+                onChangeText={setSearch}
+                placeholder="Пошук кімнат"
+                placeholderTextColor={COLORS.textMuted}
+                className="flex-1 text-white text-base px-2 py-3"
+                autoCorrect={false}
+              />
+              {search.length > 0 && (
+                <TouchableOpacity onPress={() => setSearch("")} hitSlop={10}>
+                  <Ionicons name="close-circle" size={18} color={COLORS.textMuted} />
+                </TouchableOpacity>
+              )}
+            </View>
+          }
+          ListEmptyComponent={
+            <View className="items-center py-16">
+              <Ionicons name="search-outline" size={32} color={COLORS.textMuted} />
+              <Text className="text-textMuted text-sm mt-3">Нічого не знайдено</Text>
+            </View>
           }
           renderItem={({ item }) => (
-            <TouchableOpacity
-              onPress={() =>
-                router.push({
-                  pathname: "/chat/[id]",
-                  params: { id: item._id },
-                })
-              }
-              className="bg-secondary border border-surfaceLight rounded-2xl p-4 flex-row items-center justify-between active:opacity-80"
-              activeOpacity={0.8}
-            >
-              <View className="flex-1 mr-3">
-                <Text className="text-white text-base font-bold" numberOfLines={1}>
-                  {item.title}
-                </Text>
-                {item.description ? (
-                  <Text className="text-textMuted text-sm mt-0.5" numberOfLines={1}>
-                    {item.description}
-                  </Text>
-                ) : null}
-                {item.lastMessage ? (
-                  <Text className="text-primary text-xs mt-1.5" numberOfLines={1}>
-                    Останнє: {item.lastMessage}
-                  </Text>
-                ) : null}
-              </View>
-              <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
-            </TouchableOpacity>
+            <SwipeableRoomItem
+              room={item}
+              isCreator={item.creatorId === currentUser?._id}
+              onPress={() => router.push(`/chat/${item._id}`)}
+              onDelete={handleDeleteRoom}
+            />
           )}
         />
       )}
-    </TabScreenWrapper>
+    </View>
   );
 }

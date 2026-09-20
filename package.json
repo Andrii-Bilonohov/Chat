@@ -8,6 +8,7 @@
     "@convex-dev/auth": "^0.0.95",
     "@expo/ui": "~57.0.18",
     "@expo/vector-icons": "^15.0.2",
+    "@react-navigation/elements": "^2.9.43",
     "babel-preset-expo": "~57.0.0",
     "convex": "^1.45.0",
     "expo": "~57.0.22",

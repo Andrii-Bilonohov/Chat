@@ -1,85 +1,115 @@
-import {
-    View,
-    Text,
-    TouchableOpacity,
-    Alert,
-    ActivityIndicator,
-    Image,
-} from "react-native";
+import { useState } from "react";
+import { View, Text, TouchableOpacity, Alert, ActivityIndicator, ScrollView } from "react-native";
 import { useQuery } from "convex/react";
-import { api } from "../../../convex/_generated/api";
 import { useAuthActions } from "@convex-dev/auth/react";
-import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { api } from "../../../convex/_generated/api";
 import { COLORS } from "@/constants/theme";
-import { TabScreenWrapper } from "@/components/TabScreenWrapper";
+import { TAB_BAR_SPACE } from "@/constants/layout";
+import { EditProfileModal } from "@/components/EditProfileModal";
+import { ProfileHero, StatCard } from "@/components/ProfileParts";
 
 export default function ProfileScreen() {
-    const router = useRouter();
-    const user = useQuery((api as any).users.currentUser);
+    const currentUser = useQuery(api.users.currentUser);
     const { signOut } = useAuthActions();
+    const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+
+    const profileDetails = useQuery(
+        api.users.getUserProfile,
+        currentUser?._id ? { userId: currentUser._id } : "skip"
+    );
 
     const handleSignOut = () => {
-        Alert.alert("Вихід з акаунта", "Ви дійсно бажаєте вийти з додатку?", [
+        Alert.alert("Вихід з акаунта", "Ви дійсно бажаєте вийти з Modern Chat?", [
             { text: "Скасувати", style: "cancel" },
             {
                 text: "Вийти",
                 style: "destructive",
                 onPress: async () => {
-                    await signOut();
-                    router.replace("/(auth)/login");
+                    try {
+                        await signOut();
+                    } catch (error) {
+                        console.error(error);
+                        Alert.alert("Помилка", "Не вдалося вийти з акаунта");
+                    }
                 },
             },
         ]);
     };
 
-    if (user === undefined) {
+    if (!currentUser || profileDetails === undefined) {
         return (
-            <View className="flex-1 bg-surface justify-center items-center">
-                <ActivityIndicator size="large" color={COLORS.primary} />
+            <View className="flex-1 bg-background">
+                <View className="flex-1 justify-center items-center">
+                    <ActivityIndicator size="large" color={COLORS.primary} />
+                </View>
             </View>
         );
     }
 
     return (
-        <TabScreenWrapper>
-            <View className="flex-1 bg-surface p-6 items-center">
-                {/* Аватар */}
-                <View className="w-24 h-24 rounded-full bg-secondary border-2 border-primary/40 items-center justify-center mt-6 mb-4">
-                    {user?.image ? (
-                        <Image
-                            source={{ uri: user.image }}
-                            className="w-full h-full rounded-full"
-                        />
-                    ) : (
-                        <Ionicons name="person" size={44} color={COLORS.primary} />
-                    )}
+        <View className="flex-1 bg-surface">
+            <ScrollView
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={{ padding: 16, paddingBottom: TAB_BAR_SPACE }}
+            >
+                <ProfileHero
+                    id={currentUser._id}
+                    name={currentUser.name ?? "Користувач"}
+                    username={currentUser.username}
+                    email={currentUser.email}
+                    bio={currentUser.bio}
+                    image={currentUser.image}
+                />
+
+                <View className="flex-row gap-3 mb-4">
+                    <StatCard
+                        icon="chatbubble-ellipses"
+                        color={COLORS.primary}
+                        value={profileDetails?.stats.messagesCount ?? 0}
+                        label="Повідомлень"
+                    />
+                    <StatCard
+                        icon="folder"
+                        color="#A855F7"
+                        value={profileDetails?.stats.roomsCreatedCount ?? 0}
+                        label="Створено кімнат"
+                    />
                 </View>
 
-                {/* Інформація про користувача */}
-                <Text className="text-white text-2xl font-bold">
-                    {user?.name ?? "Користувач"}
-                </Text>
-                <Text className="text-textMuted text-sm mt-1">{user?.email}</Text>
+                <View className="gap-3">
+                    <TouchableOpacity
+                        onPress={() => setIsEditModalOpen(true)}
+                        activeOpacity={0.8}
+                        className="flex-row items-center justify-center bg-primary rounded-2xl py-3.5 px-4"
+                    >
+                        <Ionicons name="create-outline" size={20} color="#FFFFFF" style={{ marginRight: 8 }} />
+                        <Text className="text-white font-bold text-base">Редагувати профіль</Text>
+                    </TouchableOpacity>
 
-                {/* Кнопка виходу */}
-                <TouchableOpacity
-                    onPress={handleSignOut}
-                    className="w-full bg-danger/20 border border-danger/30 rounded-2xl py-4 mt-12 flex-row items-center justify-center active:bg-danger/30"
-                    activeOpacity={0.8}
-                >
-                    <Ionicons
-                        name="log-out-outline"
-                        size={20}
-                        color={COLORS.danger}
-                        style={{ marginRight: 8 }}
-                    />
-                    <Text className="text-white font-bold">
-                        Вийти з акаунту
-                    </Text>
-                </TouchableOpacity>
-            </View>
-        </TabScreenWrapper>
+                    <TouchableOpacity
+                        onPress={handleSignOut}
+                        activeOpacity={0.8}
+                        className="flex-row items-center justify-center rounded-2xl py-3.5 px-4"
+                        style={{
+                            backgroundColor: "rgba(239,68,68,0.1)",
+                            borderWidth: 1,
+                            borderColor: "rgba(239,68,68,0.3)",
+                        }}
+                    >
+                        <Ionicons name="log-out-outline" size={20} color={COLORS.danger} style={{ marginRight: 8 }} />
+                        <Text style={{ color: COLORS.danger }} className="font-bold text-base">
+                            Вийти з акаунта
+                        </Text>
+                    </TouchableOpacity>
+                </View>
+            </ScrollView>
 
+            <EditProfileModal
+                visible={isEditModalOpen}
+                onClose={() => setIsEditModalOpen(false)}
+                currentUser={currentUser}
+            />
+        </View>
     );
 }

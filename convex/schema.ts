@@ -11,6 +11,9 @@ export default defineSchema({
         name: v.optional(v.string()),
         image: v.optional(v.string()),
         email: v.optional(v.string()),
+        username: v.optional(v.string()), // Унікальний нікнейм користувача (@username)
+        bio: v.optional(v.string()),      // Статус або короткий опис профілю
+        avatarStorageId: v.optional(v.id("_storage")),
     }).index("by_email", ["email"]),
 
     // Чат-кімнати
@@ -32,6 +35,9 @@ export default defineSchema({
         imageUrl: v.optional(v.string()),         // Публічне посилання на зображення
         storageId: v.optional(v.id("_storage")),  // ID файлу в Convex Storage
         isEdited: v.optional(v.boolean()),
+        replyToId: v.optional(v.id("messages")),
+        replyToSender: v.optional(v.string()),
+        replyToText: v.optional(v.string()),
     }).index("by_chat_room", ["chatRoomId"]),
 
     typingIndicators: defineTable({
