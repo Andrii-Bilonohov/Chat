@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect } from "react";
 import {
     View,
     Text,
@@ -20,6 +20,12 @@ import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { File } from "expo-file-system";
 import { fetch } from "expo/fetch";
+import {
+    useAudioRecorder,
+    useAudioRecorderState,
+    RecordingPresets,
+    requestRecordingPermissionsAsync,
+} from "expo-audio";
 import { COLORS } from "@/constants/theme";
 import { useKeyboardVisible } from "@/hooks/useKeyboardVisible";
 import { Avatar } from "@/components/Avatar";
@@ -44,6 +50,7 @@ export default function ChatRoomScreen() {
 
     const sendMessage = useMutation(api.messages.sendMessage);
     const sendMediaMessage = useMutation(api.messages.sendMediaMessage);
+    const sendAudioMessage = useMutation(api.messages.sendAudioMessage);
     const generateUploadUrl = useMutation(api.messages.generateUploadUrl);
     const editMessage = useMutation(api.messages.editMessage);
     const deleteMessage = useMutation(api.messages.deleteMessage);
@@ -55,6 +62,11 @@ export default function ChatRoomScreen() {
     const [fullscreenImage, setFullscreenImage] = useState<string | null>(null);
     const [replyTarget, setReplyTarget] = useState<ReplyTarget | null>(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
+
+   
+    const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+    const recorderState = useAudioRecorderState(audioRecorder);
+    const recordingSeconds = Math.floor((recorderState.durationMillis || 0) / 1000);
 
     const flatListRef = useRef<FlatList>(null);
     const lastTypingCallRef = useRef<number>(0);
@@ -174,6 +186,76 @@ export default function ChatRoomScreen() {
         }
     };
 
+    const startRecording = async () => {
+        const permission = await requestRecordingPermissionsAsync();
+        if (!permission.granted) {
+            Alert.alert(
+                "Дозвіл не надано",
+                "Для запису голосових повідомлень потрібен доступ до мікрофона."
+            );
+            return;
+        }
+
+        try {
+            await audioRecorder.prepareToRecordAsync();
+            audioRecorder.record();
+        } catch (error) {
+            console.error("Помилка початку запису:", error);
+            Alert.alert("Помилка", "Не вдалося розпочати запис аудіо.");
+        }
+    };
+
+    const cancelRecording = async () => {
+        try {
+            await audioRecorder.stop();
+        } catch (error) {
+            console.error("Помилка скасування запису:", error);
+        }
+    };
+
+    const stopAndSendRecording = async () => {
+        try {
+            const durationSeconds = Math.round((recorderState.durationMillis || 0) / 1000);
+            await audioRecorder.stop();
+            const uri = audioRecorder.uri;
+
+            if (!uri || durationSeconds < 1) {
+                Alert.alert("Занадто коротке", "Голосове повідомлення занадто коротке.");
+                return;
+            }
+
+            setIsSubmitting(true);
+
+            const uploadUrl = await generateUploadUrl();
+            const file = new File(uri);
+
+            const uploadResult = await fetch(uploadUrl, {
+                method: "POST",
+                headers: { "Content-Type": "audio/m4a" },
+                body: file,
+            });
+
+            if (!uploadResult.ok) throw new Error("Не вдалося завантажити аудіо");
+            const { storageId } = await uploadResult.json();
+
+            await sendAudioMessage({
+                chatRoomId,
+                audioStorageId: storageId,
+                audioDuration: durationSeconds,
+                replyToId: replyTarget ? (replyTarget.messageId as Id<"messages">) : undefined,
+                replyToSender: replyTarget?.senderName,
+                replyToText: replyTarget?.text,
+            });
+
+            setReplyTarget(null);
+        } catch (error) {
+            console.error("Помилка завантаження аудіо:", error);
+            Alert.alert("Помилка", "Не вдалося надіслати голосове повідомлення.");
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
     const handleMessageLongPress = (item: MessageItemData) => {
         const isOwn = item.senderId === currentUser?._id;
 
@@ -216,7 +298,6 @@ export default function ChatRoomScreen() {
         Alert.alert("Дії з повідомленням", undefined, options);
     };
 
-    // Комнату удалили (например, автор с другого устройства)
     if (room === null) {
         return (
             <View
@@ -241,17 +322,19 @@ export default function ChatRoomScreen() {
         );
     }
 
+    const isRecording = recorderState.isRecording;
+    const showMicButton =
+        !isRecording && !editingMessageId && !selectedImage && !inputText.trim() && !isSubmitting;
     const sendDisabled = (!inputText.trim() && !selectedImage) || isSubmitting;
     const bottomPadding = keyboardVisible ? 8 : Math.max(insets.bottom, 10);
 
     return (
         <KeyboardAvoidingView
-            className="flex-1 bg-surface"
+            className="flex-1"
             behavior={Platform.OS === "ios" ? "padding" : "height"}
         >
-            {/* Хедер */}
             <View
-                className="flex-row items-center px-2 bg-surface border-b border-surfaceLight"
+                className="flex-row items-center bg-surface px-2 border-b border-surfaceLight"
                 style={{ paddingTop: insets.top + 8, paddingBottom: 10 }}
             >
                 <TouchableOpacity
@@ -290,7 +373,6 @@ export default function ChatRoomScreen() {
                 </TouchableOpacity>
             </View>
 
-            {/* Повідомлення */}
             {messages === undefined || currentUser === undefined || room === undefined ? (
                 <View className="flex-1 justify-center items-center bg-background">
                     <ActivityIndicator size="large" color={COLORS.primary} />
@@ -299,7 +381,7 @@ export default function ChatRoomScreen() {
             ) : (
                 <FlatList
                     ref={flatListRef}
-                    className="flex-1 bg-background"
+                    className="flex-1 bg-surface"
                     data={messages}
                     keyExtractor={(item) => item._id}
                     contentContainerStyle={{
@@ -323,18 +405,29 @@ export default function ChatRoomScreen() {
                             </Text>
                         </View>
                     }
-                    renderItem={({ item }) => (
-                        <SwipeableMessageItem
-                            item={item as MessageItemData}
-                            isOwn={item.senderId === currentUser?._id}
-                            onLongPress={() => handleMessageLongPress(item as MessageItemData)}
-                            onReply={handleStartReply}
-                            onImagePress={(url) => setFullscreenImage(url)}
-                            onAuthorPress={(authorId) =>
-                                router.push({ pathname: "/user/[id]", params: { id: String(authorId) } })
-                            }
-                        />
-                    )}
+                    renderItem={({ item, index }) => {
+                        const isOwn = item.senderId === currentUser?._id;
+
+                        const next = index < messages.length - 1 ? messages[index + 1] : null;
+                        const showAvatar = !isOwn && (!next || next.senderId !== item.senderId);
+
+                        return (
+                            <SwipeableMessageItem
+                                item={item as MessageItemData}
+                                isOwn={isOwn}
+                                showAvatar={showAvatar}
+                                onLongPress={() => handleMessageLongPress(item as MessageItemData)}
+                                onReply={handleStartReply}
+                                onImagePress={(url) => setFullscreenImage(url)}
+                                onAuthorPress={(authorId) =>
+                                    router.push({
+                                        pathname: "/user/[id]",
+                                        params: { id: String(authorId) },
+                                    })
+                                }
+                            />
+                        );
+                    }}
                 />
             )}
 
@@ -378,61 +471,101 @@ export default function ChatRoomScreen() {
                     </View>
                 )}
 
-                <View className="flex-row items-end px-2 pt-2" style={{ paddingBottom: bottomPadding }}>
-                    <TouchableOpacity
-                        onPress={pickImage}
-                        disabled={isSubmitting || !!editingMessageId}
-                        activeOpacity={0.7}
-                        className={`w-10 h-10 mb-0.5 items-center justify-center ${editingMessageId ? "opacity-40" : ""
-                            }`}
-                    >
-                        <Ionicons name="attach" size={26} color={COLORS.textMuted} />
-                    </TouchableOpacity>
+                {isRecording ? (
+                    /* Баннер активного запису замінює звичайну панель вводу */
+                    <View className="flex-row items-center justify-between mx-3 my-2 bg-surfaceLight/60 px-4 py-2.5 rounded-2xl">
+                        <View className="flex-row items-center gap-3">
+                            <View className="w-3 h-3 rounded-full bg-red-500" />
+                            <Text className="text-white font-medium">Запис: {recordingSeconds} с</Text>
+                        </View>
 
-                    <View className="flex-1 mx-1 bg-background rounded-[22px] border border-surfaceLight px-3.5 py-1 min-h-[42px] justify-center">
-                        <TextInput
-                            className="text-white text-[16px] leading-[22px]"
-                            style={{
-                                maxHeight: 120,
-                                paddingTop: Platform.OS === "ios" ? 9 : 6,
-                                paddingBottom: Platform.OS === "ios" ? 9 : 6,
-                                textAlignVertical: "center",
-                            }}
-                            placeholder={
-                                editingMessageId
-                                    ? "Змініть текст..."
-                                    : replyTarget
-                                        ? `Відповідь ${replyTarget.senderName}...`
-                                        : selectedImage
-                                            ? "Підпис до фото..."
-                                            : "Повідомлення"
-                            }
-                            placeholderTextColor={COLORS.textMuted}
-                            value={inputText}
-                            onChangeText={handleTextChange}
-                            multiline
-                            underlineColorAndroid="transparent"
-                        />
+                        <View className="flex-row items-center gap-3">
+                            <TouchableOpacity onPress={cancelRecording} className="p-2 active:opacity-70">
+                                <Ionicons name="trash-outline" size={22} color="#EF4444" />
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                                onPress={stopAndSendRecording}
+                                disabled={isSubmitting}
+                                className="w-10 h-10 rounded-full bg-primary items-center justify-center active:opacity-80"
+                            >
+                                {isSubmitting ? (
+                                    <ActivityIndicator size="small" color="#FFFFFF" />
+                                ) : (
+                                    <Ionicons name="arrow-up" size={22} color="#FFFFFF" />
+                                )}
+                            </TouchableOpacity>
+                        </View>
                     </View>
-
-                    <TouchableOpacity
-                        onPress={handleSend}
-                        disabled={sendDisabled}
-                        activeOpacity={0.75}
-                        className={`w-10 h-10 mb-0.5 rounded-full items-center justify-center ${sendDisabled ? "bg-surfaceLight" : "bg-primary"
+                ) : (
+                    <View className="flex-row items-end px-2 pt-2" style={{ paddingBottom: bottomPadding }}>
+                        <TouchableOpacity
+                            onPress={pickImage}
+                            disabled={isSubmitting || !!editingMessageId}
+                            activeOpacity={0.7}
+                            className={`w-10 h-10 mb-0.5 items-center justify-center ${
+                                editingMessageId ? "opacity-40" : ""
                             }`}
-                    >
-                        {isSubmitting ? (
-                            <ActivityIndicator size="small" color="#FFFFFF" />
-                        ) : (
-                            <Ionicons
-                                name={editingMessageId ? "checkmark" : "arrow-up"}
-                                size={22}
-                                color={sendDisabled ? COLORS.textMuted : "#FFFFFF"}
+                        >
+                            <Ionicons name="attach" size={26} color={COLORS.textMuted} />
+                        </TouchableOpacity>
+
+                        <View className="flex-1 mx-1 bg-surface rounded-[22px] border border-surfaceLight px-3.5 py-1 min-h-[42px] justify-center">
+                            <TextInput
+                                className="text-white text-[16px] leading-[22px]"
+                                style={{
+                                    maxHeight: 120,
+                                    paddingTop: Platform.OS === "ios" ? 9 : 6,
+                                    paddingBottom: Platform.OS === "ios" ? 9 : 6,
+                                    textAlignVertical: "center",
+                                }}
+                                placeholder={
+                                    editingMessageId
+                                        ? "Змініть текст..."
+                                        : replyTarget
+                                            ? `Відповідь ${replyTarget.senderName}...`
+                                            : selectedImage
+                                                ? "Підпис до фото..."
+                                                : "Повідомлення"
+                                }
+                                placeholderTextColor={COLORS.textMuted}
+                                value={inputText}
+                                onChangeText={handleTextChange}
+                                multiline
+                                underlineColorAndroid="transparent"
                             />
+                        </View>
+
+                        {showMicButton ? (
+                            <TouchableOpacity
+                                onPress={startRecording}
+                                activeOpacity={0.75}
+                                className="w-10 h-10 mb-0.5 rounded-full bg-surfaceLight items-center justify-center"
+                            >
+                                <Ionicons name="mic" size={22} color={COLORS.primary} />
+                            </TouchableOpacity>
+                        ) : (
+                            <TouchableOpacity
+                                onPress={handleSend}
+                                disabled={sendDisabled}
+                                activeOpacity={0.75}
+                                className={`w-10 h-10 mb-0.5 rounded-full items-center justify-center ${
+                                    sendDisabled ? "bg-surfaceLight" : "bg-primary"
+                                }`}
+                            >
+                                {isSubmitting ? (
+                                    <ActivityIndicator size="small" color="#FFFFFF" />
+                                ) : (
+                                    <Ionicons
+                                        name={editingMessageId ? "checkmark" : "arrow-up"}
+                                        size={22}
+                                        color={sendDisabled ? COLORS.textMuted : "#FFFFFF"}
+                                    />
+                                )}
+                            </TouchableOpacity>
                         )}
-                    </TouchableOpacity>
-                </View>
+                    </View>
+                )}
             </View>
 
             <ImageViewerModal

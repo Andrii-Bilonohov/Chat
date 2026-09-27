@@ -1,6 +1,6 @@
-import { mutation, query } from "./_generated/server";
-import { v } from "convex/values";
 import { getAuthUserId } from "@convex-dev/auth/server";
+import { v } from "convex/values";
+import { mutation, query } from "./_generated/server";
 
 /**
  * Отримання списку повідомлень у вказаній кімнаті в хронологічному порядку
@@ -208,4 +208,54 @@ export const sendMediaMessage = mutation({
 
         return messageId;
     },
+});
+
+export const sendAudioMessage = mutation({
+  args: {
+    chatRoomId: v.id("chatRooms"),
+    audioStorageId: v.id("_storage"),
+    audioDuration: v.number(),
+    replyToId: v.optional(v.id("messages")),
+    replyToSender: v.optional(v.string()),
+    replyToText: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) {
+      throw new Error("Необхідно авторизуватися");
+    }
+
+    const user = await ctx.db.get(userId);
+    if (!user) {
+      throw new Error("Користувача не знайдено");
+    }
+
+    // Отримуємо публічне посилання на аудіофайл зі сховища
+    const audioUrl = await ctx.storage.getUrl(args.audioStorageId);
+    if (!audioUrl) {
+      throw new Error("Не вдалося отримати URL аудіофайлу");
+    }
+
+    const messageId = await ctx.db.insert("messages", {
+      chatRoomId: args.chatRoomId,
+      senderId: userId,
+    senderName: user.name ?? user.email?.split("@")[0] ?? "Undefined",
+      senderPhoto: user.image ?? undefined,
+      audioUrl,
+      audioStorageId: args.audioStorageId,
+      audioDuration: args.audioDuration,
+      replyToId: args.replyToId,
+      replyToSender: args.replyToSender,
+      replyToText: args.replyToText,
+    });
+
+    // Оновлюємо останнє повідомлення у кімнаті
+    await ctx.db.patch(args.chatRoomId, {
+      lastMessage: "🎤 Голосове повідомлення",
+      lastMessageAt: Date.now(),
+      lastMessageSender: user.name ?? user.email?.split("@")[0] ?? "Undefined",
+    });
+
+    return messageId;
+  },
 });

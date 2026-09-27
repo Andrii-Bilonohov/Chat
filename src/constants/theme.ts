@@ -1,4 +1,3 @@
-// constants/theme.ts
 export const COLORS = {
     primary: "#3B82F6",
     primaryDark: "#1D4ED8",
@@ -8,5 +7,6 @@ export const COLORS = {
     surfaceLight: "#334155",
     white: "#FFFFFF",
     textMuted: "#94A3B8",
+    grey: "#94A3B8",
     danger: "#EF4444",
 } as const;

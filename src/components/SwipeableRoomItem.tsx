@@ -8,7 +8,6 @@ import Animated, {
     runOnJS,
 } from "react-native-reanimated";
 import { Ionicons } from "@expo/vector-icons";
-import { COLORS } from "@/constants/theme";
 import { Id } from "../../convex/_generated/dataModel";
 import { Avatar } from "@/components/Avatar";
 

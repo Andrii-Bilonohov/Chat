@@ -1,16 +1,21 @@
-import React from "react";
-import { View, Text, Pressable, TouchableOpacity, Image } from "react-native";
-import { GestureDetector, Gesture } from "react-native-gesture-handler";
-import Animated, {
-    useSharedValue,
-    useAnimatedStyle,
-    withSpring,
-    runOnJS,
-} from "react-native-reanimated";
-import { Ionicons } from "@expo/vector-icons";
-import { COLORS } from "@/constants/theme";
-import { Id } from "../../convex/_generated/dataModel";
 import { Avatar, colorForId } from "@/components/Avatar";
+import { COLORS } from "@/constants/theme";
+import { Ionicons } from "@expo/vector-icons";
+import { Image, Pressable, Text, TouchableOpacity, View } from "react-native";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import Animated, {
+    runOnJS,
+    useAnimatedStyle,
+    useSharedValue,
+    withSpring,
+} from "react-native-reanimated";
+import { Id } from "../../convex/_generated/dataModel";
+import { api } from "../../convex/_generated/api";
+import { useMutation } from "convex/react";
+import { VoiceMessagePlayer } from "./VoiceMessagePlayer";
+import { useState } from "react";
+import { ReactionPickerModal } from "./ReactionPickerModal";
+import { ReactionBadges } from "./ReactionBadges";
 
 export interface MessageItemData {
     _id: Id<"messages">;
@@ -24,11 +29,14 @@ export interface MessageItemData {
     replyToSender?: string;
     replyToText?: string;
     _creationTime: number;
+    audioUrl?: string;
+    audioDuration?: number;
 }
 
 interface SwipeableMessageItemProps {
     item: MessageItemData;
     isOwn: boolean;
+    showAvatar?: boolean;
     onLongPress: () => void;
     onReply: (message: MessageItemData) => void;
     onImagePress?: (url: string) => void;
@@ -40,6 +48,7 @@ const SWIPE_THRESHOLD = 52;
 export const SwipeableMessageItem: React.FC<SwipeableMessageItemProps> = ({
     item,
     isOwn,
+    showAvatar = true,
     onLongPress,
     onReply,
     onImagePress,
@@ -85,206 +94,160 @@ export const SwipeableMessageItem: React.FC<SwipeableMessageItemProps> = ({
     const hasText = !!item.content?.trim();
     const hasImage = !!item.imageUrl;
     const hasReply = !!item.replyToSender;
-    const imageOnly = hasImage && !hasText;
+    const hasAudio = !!item.audioUrl;
+    const imageOnly = hasImage && !hasText && !hasAudio;
+    const audioUrl = item.audioUrl;
+    const audioDuration = item.audioDuration ?? 0;
 
     const nameColor = colorForId(item.senderId);
-    const metaColor = isOwn ? "rgba(255,255,255,0.7)" : COLORS.textMuted;
+
+    const [showReactionPicker, setShowReactionPicker] = useState(false);
+    const toggleReaction = useMutation(api.reactions.toggleReaction);
+
+    const handleSelectEmoji = async (emoji: string) => {
+        try {
+            await toggleReaction({ messageId: item._id, emoji });
+        } catch (error) {
+            console.error("Помилка реакції:", error);
+        }
+    };
+
+    
+    const handleLongPress = () => setShowReactionPicker(true);
+
+    const handleMoreActions = () => {
+        setShowReactionPicker(false);
+        onLongPress();
+    };
 
     return (
-        <View style={{ marginBottom: 6 }}>
+        <View className="mb-1.5">
             <Animated.View
                 pointerEvents="none"
-                style={[
-                    {
-                        position: "absolute",
-                        left: 4,
-                        top: 0,
-                        bottom: 0,
-                        justifyContent: "center",
-                    },
-                    replyIconStyle,
-                ]}
+                style={[{ position: "absolute", left: 4, top: 0, bottom: 0, justifyContent: "center" }, replyIconStyle]}
             >
-                <View
-                    style={{
-                        width: 30,
-                        height: 30,
-                        borderRadius: 15,
-                        backgroundColor: "rgba(59,130,246,0.2)",
-                        alignItems: "center",
-                        justifyContent: "center",
-                    }}
-                >
+                <View className="w-[30px] h-[30px] rounded-full bg-primary/20 items-center justify-center">
                     <Ionicons name="arrow-undo" size={16} color={COLORS.primary} />
                 </View>
             </Animated.View>
 
             <GestureDetector gesture={panGesture}>
                 <Animated.View
-                    style={[
-                        {
-                            flexDirection: "row",
-                            alignItems: "flex-end",
-                            justifyContent: isOwn ? "flex-end" : "flex-start",
-                        },
-                        bubbleStyle,
-                    ]}
+                    className={`flex-row items-end ${isOwn ? "justify-end" : "justify-start"}`}
+                    style={bubbleStyle}
                 >
-                    {!isOwn && (
+                    {!isOwn && showAvatar && (
                         <TouchableOpacity
                             onPress={() => onAuthorPress?.(item.senderId)}
                             activeOpacity={0.7}
-                            style={{ marginRight: 6 }}
+                            className="mr-1.5 mb-0.5"
                         >
-                            <Avatar
-                                id={item.senderId}
-                                name={item.senderName}
-                                uri={item.senderPhoto}
-                                size={30}
-                            />
+                            <Avatar id={item.senderId} name={item.senderName} uri={item.senderPhoto} size={30} />
                         </TouchableOpacity>
                     )}
 
-                    <Pressable
-                        onLongPress={onLongPress}
-                        delayLongPress={250}
-                        style={({ pressed }) => ({
-                            maxWidth: "78%",
-                            flexShrink: 1,
-                            borderRadius: 18,
-                            borderBottomRightRadius: isOwn ? 5 : 18,
-                            borderBottomLeftRadius: isOwn ? 18 : 5,
-                            backgroundColor: isOwn ? COLORS.primary : COLORS.secondary,
-                            borderWidth: isOwn ? 0 : 1,
-                            borderColor: "rgba(51,65,85,0.6)",
-                            paddingHorizontal: imageOnly ? 4 : 11,
-                            paddingTop: imageOnly ? 4 : hasReply || hasImage ? 7 : 8,
-                            paddingBottom: imageOnly ? 4 : 6,
-                            overflow: "hidden",
-                            opacity: pressed ? 0.92 : 1,
-                        })}
-                    >
+                    {!isOwn && !showAvatar && <View className="w-9" />}
+
+                    <View className={`max-w-[78%] shrink ${isOwn ? "items-end" : "items-start"}`}>
                         {!isOwn && (
                             <Text
-                                style={{
-                                    color: nameColor,
-                                    fontSize: 13,
-                                    fontWeight: "700",
-                                    marginBottom: 3,
-                                    marginLeft: imageOnly ? 7 : 0,
-                                    marginTop: imageOnly ? 3 : 0,
-                                }}
+                                style={{ color: nameColor }}
+                                className="text-[13px] font-bold mb-0.5 ml-0.5"
                                 numberOfLines={1}
                             >
                                 {item.senderName}
                             </Text>
                         )}
 
-                        {hasReply && (
-                            <View
-                                style={{
-                                    marginBottom: 6,
-                                    paddingLeft: 8,
-                                    paddingRight: 8,
-                                    paddingVertical: 5,
-                                    borderRadius: 8,
-                                    borderLeftWidth: 3,
-                                    borderLeftColor: isOwn ? "rgba(255,255,255,0.85)" : COLORS.primary,
-                                    backgroundColor: isOwn ? "rgba(0,0,0,0.18)" : "rgba(59,130,246,0.12)",
-                                }}
-                            >
-                                <Text
-                                    style={{
-                                        color: isOwn ? "#FFFFFF" : "#60A5FA",
-                                        fontSize: 12,
-                                        fontWeight: "700",
-                                    }}
-                                    numberOfLines={1}
-                                >
-                                    {item.replyToSender}
-                                </Text>
-                                <Text
-                                    style={{
-                                        color: isOwn ? "rgba(255,255,255,0.85)" : "#CBD5E1",
-                                        fontSize: 12.5,
-                                        marginTop: 1,
-                                        lineHeight: 16,
-                                    }}
-                                    numberOfLines={2}
-                                >
-                                    {item.replyToText || "📷 Фотографія"}
-                                </Text>
-                            </View>
-                        )}
-
-                        {hasImage && (
-                            <TouchableOpacity
-                                activeOpacity={0.9}
-                                onPress={() => onImagePress?.(item.imageUrl!)}
-                                onLongPress={onLongPress}
+                        <View className={`items-end ${isOwn ? "flex-row-reverse" : "flex-row"}`}>
+                            <Pressable
+                                onLongPress={handleLongPress}
                                 delayLongPress={250}
-                                style={{ marginBottom: hasText ? 6 : 0 }}
+                                className={`overflow-hidden rounded-2xl ${isOwn
+                                    ? "bg-primary rounded-br-md"
+                                    : "bg-secondary border border-surfaceLight/60 rounded-bl-md"
+                                    } ${imageOnly
+                                        ? "p-1"
+                                        : hasReply || hasImage
+                                            ? "px-2.5 pt-1.5 pb-2"
+                                            : "px-2.5 py-2"
+                                    }`}
+                                style={({ pressed }) => ({ opacity: pressed ? 0.92 : 1 })}
                             >
-                                <Image
-                                    source={{ uri: item.imageUrl }}
-                                    style={{
-                                        width: 236,
-                                        height: 236,
-                                        borderRadius: imageOnly ? 15 : 12,
-                                        backgroundColor: "rgba(0,0,0,0.25)",
-                                    }}
-                                    resizeMode="cover"
-                                />
-                                {imageOnly && (
+                                {hasReply && (
                                     <View
-                                        style={{
-                                            position: "absolute",
-                                            right: 8,
-                                            bottom: 8,
-                                            paddingHorizontal: 7,
-                                            paddingVertical: 2,
-                                            borderRadius: 10,
-                                            backgroundColor: "rgba(0,0,0,0.5)",
-                                        }}
+                                        className={`mb-1.5 pl-2 pr-2 py-1.5 rounded-lg border-l-[3px] ${isOwn
+                                            ? "border-l-white/85 bg-black/20"
+                                            : "border-l-primary bg-primary/10"
+                                            }`}
                                     >
-                                        <Text style={{ color: "#FFFFFF", fontSize: 11 }}>{metaLabel}</Text>
+                                        <Text
+                                            className={`text-[12px] font-bold ${isOwn ? "text-white" : "text-[#60A5FA]"
+                                                }`}
+                                            numberOfLines={1}
+                                        >
+                                            {item.replyToSender}
+                                        </Text>
+                                        <Text
+                                            className={`text-[12.5px] mt-0.5 leading-4 ${isOwn ? "text-white/85" : "text-[#CBD5E1]"
+                                                }`}
+                                            numberOfLines={2}
+                                        >
+                                            {item.replyToText || "📷 Фотографія"}
+                                        </Text>
                                     </View>
                                 )}
-                            </TouchableOpacity>
-                        )}
 
-                        {hasText && (
-                            <View>
-                                <Text
-                                    style={{
-                                        color: "#FFFFFF",
-                                        fontSize: 15.5,
-                                        lineHeight: 21,
-                                        letterSpacing: 0.1,
-                                    }}
-                                >
-                                    {item.content}
-                                    <Text style={{ color: "transparent", fontSize: 11 }}>
-                                        {"\u00A0\u00A0\u00A0" + metaLabel}
+                                {hasImage && (
+                                    <TouchableOpacity
+                                        activeOpacity={0.9}
+                                        onPress={() => onImagePress?.(item.imageUrl!)}
+                                        onLongPress={handleLongPress}
+                                        delayLongPress={250}
+                                        className={hasText || hasAudio ? "mb-1.5" : ""}
+                                    >
+                                        <Image
+                                            source={{ uri: item.imageUrl }}
+                                            className={`w-[236px] h-[236px] bg-black/25 ${imageOnly ? "rounded-2xl" : "rounded-xl"
+                                                }`}
+                                            resizeMode="cover"
+                                        />
+                                    </TouchableOpacity>
+                                )}
+
+                                {hasAudio && (
+                                    <View className="my-0.5">
+                                        <VoiceMessagePlayer
+                                            audioUrl={audioUrl!}
+                                            duration={audioDuration}
+                                            isMyMessage={isOwn}
+                                        />
+                                    </View>
+                                )}
+
+                                {hasText && (
+                                    <Text className="text-white text-[15.5px] leading-[21px] tracking-[0.1px]">
+                                        {item.content}
                                     </Text>
-                                </Text>
+                                )}
+                            </Pressable>
 
-                                <Text
-                                    style={{
-                                        position: "absolute",
-                                        right: 0,
-                                        bottom: 1,
-                                        color: metaColor,
-                                        fontSize: 11,
-                                    }}
-                                >
-                                    {metaLabel}
-                                </Text>
-                            </View>
-                        )}
-                    </Pressable>
+                            <Text className="text-[11px] mx-1.5 mb-0.5 text-[rgba(148,163,184,0.9)]">
+                                {metaLabel}
+                            </Text>
+                        </View>
+                    </View>
                 </Animated.View>
             </GestureDetector>
+
+            <ReactionBadges messageId={item._id} />
+
+            <ReactionPickerModal
+                visible={showReactionPicker}
+                onClose={() => setShowReactionPicker(false)}
+                onSelectEmoji={handleSelectEmoji}
+                onMoreActions={handleMoreActions}
+            />
         </View>
     );
 };
