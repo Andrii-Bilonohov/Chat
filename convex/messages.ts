@@ -2,7 +2,8 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { paginationOptsValidator } from "convex/server";
-
+import { internal } from "./_generated/api";
+import { Id } from "./_generated/dataModel";
 /**
  * Отримання списку повідомлень у вказаній кімнаті в хронологічному порядку
  */
@@ -21,50 +22,124 @@ export const listMessages = query({
  * Відправка нового повідомлення
  */
 export const sendMessage = mutation({
-    args: {
-        chatRoomId: v.id("chatRooms"),
-        content: v.string(),
-        replyToId: v.optional(v.id("messages")),
-        replyToSender: v.optional(v.string()),
-        replyToText: v.optional(v.string()),
-    },
-    handler: async (ctx, args) => {
-        const userId = await getAuthUserId(ctx);
-        if (!userId) {
-            throw new Error("Unauthorized: Потрібна авторизація");
+  args: {
+    chatRoomId: v.id("chatRooms"),
+    content: v.string(),
+    replyToId: v.optional(v.id("messages")),
+    replyToSender: v.optional(v.string()),
+    replyToText: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) {
+      throw new Error("Unauthorized: Потрібна авторизація");
+    }
+
+    const user = await ctx.db.get(userId);
+    if (!user) {
+      throw new Error("User not found: Користувача не знайдено");
+    }
+
+    const trimmedContent = args.content.trim();
+    if (!trimmedContent) {
+      throw new Error("Message content cannot be empty");
+    }
+
+    // 1. Зберігаємо повідомлення в базі
+    const messageId = await ctx.db.insert("messages", {
+      chatRoomId: args.chatRoomId,
+      senderId: userId,
+      senderName: user.name ?? user.email ?? "Співрозмовник",
+      senderPhoto: user.image,
+      content: trimmedContent,
+      replyToId: args.replyToId,
+      replyToSender: args.replyToSender,
+      replyToText: args.replyToText,
+    });
+
+    // 2. Оновлюємо інформацію про останнє повідомлення в кімнаті
+    await ctx.db.patch(args.chatRoomId, {
+      lastMessage: trimmedContent,
+      lastMessageAt: Date.now(),
+    });
+
+    // 3. Відправка Push-сповіщень через фоновий планувальник
+    const room = await ctx.db.get(args.chatRoomId);
+    const senderName = user.name ?? user.email ?? "Співрозмовник";
+    const roomTitle = room?.title ?? "Чат";
+
+    let replyAuthorId: Id<"users"> | null = null;
+
+    // СЦЕНАРІЙ А: Якщо це відповідь на чиєсь повідомлення (Reply)
+    if (args.replyToId) {
+      const originalMessage = await ctx.db.get(args.replyToId);
+      if (originalMessage && originalMessage.senderId !== userId) {
+        replyAuthorId = originalMessage.senderId;
+        const originalAuthor = await ctx.db.get(originalMessage.senderId);
+
+        if (originalAuthor?.pushToken) {
+          await ctx.scheduler.runAfter(
+            0,
+            internal.pushNotifications.sendPushNotification,
+            {
+              pushToken: originalAuthor.pushToken,
+              title: `💬 Відповідь від ${senderName}`,
+              body: `${senderName} відповів(-ла) у "${roomTitle}": ${trimmedContent}`,
+              data: {
+                type: "reply",
+                roomId: args.chatRoomId,
+                messageId,
+              },
+            }
+          );
         }
+      }
+    }
 
-        const user = await ctx.db.get(userId);
-        if (!user) {
-            throw new Error("User not found: Користувача не знайдено");
-        }
+    // СЦЕНАРІЙ Б: Відправка решті учасників кімнати
+    // Отримуємо повідомлення кімнати для визначення списку учасників
+    const recentMessages = await ctx.db
+      .query("messages")
+      .withIndex("by_chat_room", (q) => q.eq("chatRoomId", args.chatRoomId))
+      .collect();
 
-        const trimmedContent = args.content.trim();
-        if (!trimmedContent) {
-            throw new Error("Message content cannot be empty");
-        }
+    const recipientIds = new Set<Id<"users">>();
 
-        // 1. Зберігаємо повідомлення разом із даними цитування
-        const messageId = await ctx.db.insert("messages", {
-            chatRoomId: args.chatRoomId,
-            senderId: userId,
-            senderName: user.name ?? user.email ?? "Користувач",
-            senderPhoto: user.image,
-            content: trimmedContent,
-            replyToId: args.replyToId,
-            replyToSender: args.replyToSender,
-            replyToText: args.replyToText,
-            createdAt: Date.now(),
-        });
+    // Додаємо творця кімнати, якщо це не автор повідомлення
+    if (room?.creatorId && room.creatorId !== userId && room.creatorId !== replyAuthorId) {
+      recipientIds.add(room.creatorId);
+    }
 
-        // 2. Оновлюємо інформацію про останнє повідомлення в кімнаті
-        await ctx.db.patch(args.chatRoomId, {
-            lastMessage: `${user.name ?? "Користувач"}: ${trimmedContent}`,
-            lastMessageAt: Date.now(),
-        });
+    // Додаємо всіх, хто писав у цю кімнату раніше
+    for (const msg of recentMessages) {
+      if (msg.senderId !== userId && msg.senderId !== replyAuthorId) {
+        recipientIds.add(msg.senderId);
+      }
+    }
 
-        return messageId;
-    },
+    // Відправляємо пуші всім знайденим учасникам
+    for (const recipientId of recipientIds) {
+      const recipient = await ctx.db.get(recipientId);
+      if (recipient?.pushToken) {
+        await ctx.scheduler.runAfter(
+          0,
+          internal.pushNotifications.sendPushNotification,
+          {
+            pushToken: recipient.pushToken,
+            title: `${senderName} (${roomTitle})`,
+            body: trimmedContent,
+            data: {
+              type: "message",
+              roomId: args.chatRoomId,
+              messageId,
+            },
+          }
+        );
+      }
+    }
+
+    return messageId;
+  },
 });
 
 export const editMessage = mutation({

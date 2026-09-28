@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "397488614708",
+    "project_id": "chat-88a11",
+    "storage_bucket": "chat-88a11.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:397488614708:android:4939d14af595bdf8974961",
+        "android_client_info": {
+          "package_name": "com.modernchat.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC-TEP0gOwsp4Rcz19aZHNATi5ThV6yn9U"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

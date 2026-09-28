@@ -128,3 +128,5 @@ Migrations/*.Designer.cs
 
 .claude
 .vscode
+
+.chat*

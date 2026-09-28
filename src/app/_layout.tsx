@@ -8,6 +8,7 @@ import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import "../../global.css";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { usePushNotifications } from "@/hooks/usePushNotifications";
 
 const secureStorage = {
   getItem: SecureStore.getItemAsync,
@@ -16,6 +17,8 @@ const secureStorage = {
 };
 
 function MainLayout() {
+  usePushNotifications()
+  
   const { isLoading, isAuthenticated } = useConvexAuth();
   const segments = useSegments();
   const router = useRouter();
