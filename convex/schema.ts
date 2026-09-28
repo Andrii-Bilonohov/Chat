@@ -43,7 +43,14 @@ export default defineSchema({
 
         audioUrl: v.optional(v.string()),
         audioStorageId: v.optional(v.id("_storage")),
-        audioDuration: v.optional(v.number())
+        audioDuration: v.optional(v.number()),
+
+        videoUrl: v.optional(v.string()),
+        videoStorageId: v.optional(v.id("_storage")),
+        videoDuration: v.optional(v.number()),
+        isVideoNote: v.optional(v.boolean()),
+
+        createdAt: v.optional(v.number())
     }).index("by_chat_room", ["chatRoomId"]),
 
     typingIndicators: defineTable({
@@ -56,11 +63,11 @@ export default defineSchema({
         .index("by_user_and_room", ["userId", "chatRoomId"]),
 
     messageReactions: defineTable({
-    messageId: v.id("messages"),
-    userId: v.id("users"),
-    emoji: v.string(),
-    createdAt: v.number(),
-  })
-    .index("by_message", ["messageId"])
-    .index("by_message_and_user", ["messageId", "userId"]),
+        messageId: v.id("messages"),
+        userId: v.id("users"),
+        emoji: v.string(),
+        createdAt: v.number(),
+    })
+        .index("by_message", ["messageId"])
+        .index("by_message_and_user", ["messageId", "userId"]),
 });

@@ -1,6 +1,7 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import { paginationOptsValidator } from "convex/server";
 
 /**
  * Отримання списку повідомлень у вказаній кімнаті в хронологічному порядку
@@ -53,6 +54,7 @@ export const sendMessage = mutation({
             replyToId: args.replyToId,
             replyToSender: args.replyToSender,
             replyToText: args.replyToText,
+            createdAt: Date.now(),
         });
 
         // 2. Оновлюємо інформацію про останнє повідомлення в кімнаті
@@ -199,6 +201,7 @@ export const sendMediaMessage = mutation({
             replyToId: args.replyToId,
             replyToSender: args.replyToSender,
             replyToText: args.replyToText,
+            createdAt: Date.now()
         });
 
         await ctx.db.patch(args.chatRoomId, {
@@ -211,51 +214,151 @@ export const sendMediaMessage = mutation({
 });
 
 export const sendAudioMessage = mutation({
+    args: {
+        chatRoomId: v.id("chatRooms"),
+        audioStorageId: v.id("_storage"),
+        audioDuration: v.number(),
+        replyToId: v.optional(v.id("messages")),
+        replyToSender: v.optional(v.string()),
+        replyToText: v.optional(v.string()),
+    },
+    handler: async (ctx, args) => {
+        const userId = await getAuthUserId(ctx);
+        if (!userId) {
+            throw new Error("Необхідно авторизуватися");
+        }
+
+        const user = await ctx.db.get(userId);
+        if (!user) {
+            throw new Error("Користувача не знайдено");
+        }
+
+        // Отримуємо публічне посилання на аудіофайл зі сховища
+        const audioUrl = await ctx.storage.getUrl(args.audioStorageId);
+        if (!audioUrl) {
+            throw new Error("Не вдалося отримати URL аудіофайлу");
+        }
+
+        const messageId = await ctx.db.insert("messages", {
+            chatRoomId: args.chatRoomId,
+            senderId: userId,
+            senderName: user.name ?? user.email?.split("@")[0] ?? "Undefined",
+            senderPhoto: user.image ?? undefined,
+            audioUrl,
+            audioStorageId: args.audioStorageId,
+            audioDuration: args.audioDuration,
+            replyToId: args.replyToId,
+            replyToSender: args.replyToSender,
+            replyToText: args.replyToText,
+            createdAt: Date.now()
+        });
+
+        // Оновлюємо останнє повідомлення у кімнаті
+        await ctx.db.patch(args.chatRoomId, {
+            lastMessage: "🎤 Голосове повідомлення",
+            lastMessageAt: Date.now(),
+            lastMessageSender: user.name ?? user.email?.split("@")[0] ?? "Undefined",
+        });
+
+        return messageId;
+    },
+});
+
+export const sendVideoNoteMessage = mutation({
+    args: {
+        chatRoomId: v.id("chatRooms"),
+        videoStorageId: v.id("_storage"),
+        videoDuration: v.number(),
+    },
+    handler: async (ctx, args) => {
+        const userId = await getAuthUserId(ctx);
+        if (!userId) {
+            throw new Error("Необхідно авторизуватися");
+        }
+
+        const user = await ctx.db.get(userId);
+        if (!user) {
+            throw new Error("Користувача не знайдено");
+        }
+
+        // Отримуємо публічний URL відео з Convex Storage
+        const videoUrl = await ctx.storage.getUrl(args.videoStorageId);
+        if (!videoUrl) {
+            throw new Error("Не вдалося отримати URL відеофайлу");
+        }
+
+        // Зберігаємо повідомлення в базі
+        const messageId = await ctx.db.insert("messages", {
+            chatRoomId: args.chatRoomId,
+            senderId: userId,
+            senderName: user.name ?? user.email?.split("@")[0] ?? "Undefined",
+            senderPhoto: user.image ?? undefined,
+            videoUrl,
+            videoStorageId: args.videoStorageId,
+            videoDuration: args.videoDuration,
+            isVideoNote: true,
+            createdAt: Date.now(),
+        });
+
+        // Оновлюємо час останньої активності в кімнаті (якщо є поле lastMessageAt)
+        await ctx.db.patch(args.chatRoomId, {
+            lastMessageAt: Date.now(),
+        });
+
+        return messageId;
+    },
+});
+
+// convex/messages.ts
+
+/**
+ * Отримує повідомлення кімнати порціями (курсорна пагінація від найновіших до найстаріших)
+ */
+export const getPaginatedMessages = query({
   args: {
     chatRoomId: v.id("chatRooms"),
-    audioStorageId: v.id("_storage"),
-    audioDuration: v.number(),
-    replyToId: v.optional(v.id("messages")),
-    replyToSender: v.optional(v.string()),
-    replyToText: v.optional(v.string()),
+    paginationOpts: paginationOptsValidator,
   },
   handler: async (ctx, args) => {
     const userId = await getAuthUserId(ctx);
     if (!userId) {
-      throw new Error("Необхідно авторизуватися");
+      return {
+        page: [],
+        isDone: true,
+        continueCursor: "",
+      };
     }
 
-    const user = await ctx.db.get(userId);
-    if (!user) {
-      throw new Error("Користувача не знайдено");
+    const paginated = await ctx.db
+      .query("messages")
+      .withIndex("by_chat_room", (q) => q.eq("chatRoomId", args.chatRoomId))
+      .order("asc")
+      .paginate(args.paginationOpts);
+
+    if (paginated.page.length === 0) {
+      return paginated;
     }
 
-    // Отримуємо публічне посилання на аудіофайл зі сховища
-    const audioUrl = await ctx.storage.getUrl(args.audioStorageId);
-    if (!audioUrl) {
-      throw new Error("Не вдалося отримати URL аудіофайлу");
-    }
+    // 2. Збагачуємо інформацією про авторів ТІЛЬКИ поточну завантажену порцію!
+    const messagesWithSender = await Promise.all(
+      paginated.page.map(async (msg) => {
+        const sender = await ctx.db.get(msg.senderId);
 
-    const messageId = await ctx.db.insert("messages", {
-      chatRoomId: args.chatRoomId,
-      senderId: userId,
-    senderName: user.name ?? user.email?.split("@")[0] ?? "Undefined",
-      senderPhoto: user.image ?? undefined,
-      audioUrl,
-      audioStorageId: args.audioStorageId,
-      audioDuration: args.audioDuration,
-      replyToId: args.replyToId,
-      replyToSender: args.replyToSender,
-      replyToText: args.replyToText,
-    });
+        return {
+          ...msg,
+          sender: {
+            _id: sender?._id,
+            name: sender?.name ?? sender?.username ?? "Користувач",
+            username: sender?.username,
+            image: sender?.image,
+          },
+        };
+      })
+    );
 
-    // Оновлюємо останнє повідомлення у кімнаті
-    await ctx.db.patch(args.chatRoomId, {
-      lastMessage: "🎤 Голосове повідомлення",
-      lastMessageAt: Date.now(),
-      lastMessageSender: user.name ?? user.email?.split("@")[0] ?? "Undefined",
-    });
-
-    return messageId;
+    return {
+      ...paginated,
+      page: messagesWithSender,
+    };
   },
 });

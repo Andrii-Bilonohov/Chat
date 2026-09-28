@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef } from "react";
 import {
     View,
     Text,
@@ -12,7 +12,7 @@ import {
     Image,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useQuery, useMutation } from "convex/react";
+import { useQuery, useMutation, usePaginatedQuery } from "convex/react";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
@@ -33,8 +33,11 @@ import { ImageViewerModal } from "@/components/ImageViewerModal";
 import { TypingDots } from "@/components/TypingDots";
 import { SwipeableMessageItem, MessageItemData } from "@/components/SwipeableMessageItem";
 import { ReplyPreviewBar, ReplyTarget } from "@/components/ReplyPreviewBar";
+import { VideoNoteRecorder } from "@/components/VideoNoteRecorder";
 
 type SelectedImage = { uri: string; mimeType: string };
+
+const MESSAGES_PAGE_SIZE = 25;
 
 export default function ChatRoomScreen() {
     const { id } = useLocalSearchParams<{ id: string }>();
@@ -44,13 +47,23 @@ export default function ChatRoomScreen() {
 
     const chatRoomId = id as Id<"chatRooms">;
     const room = useQuery(api.rooms.getRoom, { roomId: chatRoomId });
-    const messages = useQuery(api.messages.listMessages, { chatRoomId });
     const currentUser = useQuery(api.users.currentUser);
     const typingUsers = useQuery(api.typing.getTypingUsers, { chatRoomId });
+
+    const {
+        results: messages,
+        status,
+        loadMore,
+    } = usePaginatedQuery(
+        api.messages.getPaginatedMessages,
+        { chatRoomId },
+        { initialNumItems: MESSAGES_PAGE_SIZE }
+    );
 
     const sendMessage = useMutation(api.messages.sendMessage);
     const sendMediaMessage = useMutation(api.messages.sendMediaMessage);
     const sendAudioMessage = useMutation(api.messages.sendAudioMessage);
+    const sendVideoNote = useMutation(api.messages.sendVideoNoteMessage);
     const generateUploadUrl = useMutation(api.messages.generateUploadUrl);
     const editMessage = useMutation(api.messages.editMessage);
     const deleteMessage = useMutation(api.messages.deleteMessage);
@@ -62,24 +75,21 @@ export default function ChatRoomScreen() {
     const [fullscreenImage, setFullscreenImage] = useState<string | null>(null);
     const [replyTarget, setReplyTarget] = useState<ReplyTarget | null>(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [isVideoRecorderVisible, setIsVideoRecorderVisible] = useState(false);
 
-   
     const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
     const recorderState = useAudioRecorderState(audioRecorder);
     const recordingSeconds = Math.floor((recorderState.durationMillis || 0) / 1000);
 
-    const flatListRef = useRef<FlatList>(null);
     const lastTypingCallRef = useRef<number>(0);
-    const didInitialScroll = useRef(false);
+    const flatListRef = useRef<FlatList>(null);
 
-    const messagesCount = messages?.length ?? 0;
-    useEffect(() => {
-        if (messagesCount === 0) return;
-        const animated = didInitialScroll.current;
-        didInitialScroll.current = true;
-        const t = setTimeout(() => flatListRef.current?.scrollToEnd({ animated }), 60);
-        return () => clearTimeout(t);
-    }, [messagesCount]);
+    // Список inverted: index 0 = найновіше повідомлення, старіші підвантажуються вгору
+    const handleLoadMore = () => {
+        if (status === "CanLoadMore") {
+            loadMore(MESSAGES_PAGE_SIZE);
+        }
+    };
 
     const handleTextChange = (text: string) => {
         setInputText(text);
@@ -94,8 +104,8 @@ export default function ChatRoomScreen() {
 
     const pickImage = async () => {
         try {
-            const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-            if (status !== "granted") {
+            const { status: permStatus } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+            if (permStatus !== "granted") {
                 Alert.alert("Дозвіл потрібен", "Надайте доступ до медіатеки для надсилання фотографій.");
                 return;
             }
@@ -120,7 +130,9 @@ export default function ChatRoomScreen() {
         setReplyTarget({
             messageId: msg._id,
             senderName: msg.senderName,
-            text: msg.content || (msg.imageUrl ? "📷 Фотографія" : ""),
+            text:
+                msg.content ||
+                (msg.imageUrl ? "📷 Фотографія" : msg.videoUrl ? "🎥 Відео" : msg.audioUrl ? "🎤 Голосове" : ""),
         });
         setEditingMessageId(null);
     };
@@ -256,6 +268,41 @@ export default function ChatRoomScreen() {
         }
     };
 
+    const handleSendVideoNote = async (videoUri: string, duration: number) => {
+        try {
+            setIsSubmitting(true);
+
+            const uploadUrl = await generateUploadUrl();
+            const file = new File(videoUri);
+
+            const uploadResult = await fetch(uploadUrl, {
+                method: "POST",
+                headers: {
+                    "Content-Type": videoUri.toLowerCase().endsWith(".mov")
+                        ? "video/quicktime"
+                        : "video/mp4",
+                },
+                body: file,
+            });
+
+            if (!uploadResult.ok) throw new Error("Не вдалося завантажити відео");
+            const { storageId } = await uploadResult.json();
+
+            await sendVideoNote({
+                chatRoomId,
+                videoStorageId: storageId,
+                videoDuration: Math.round(duration),
+            });
+
+            setIsVideoRecorderVisible(false);
+        } catch (error) {
+            console.error("Помилка надсилання відеокружечка:", error);
+            Alert.alert("Помилка", "Не вдалося надіслати відеоповідомлення");
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
     const handleMessageLongPress = (item: MessageItemData) => {
         const isOwn = item.senderId === currentUser?._id;
 
@@ -298,6 +345,7 @@ export default function ChatRoomScreen() {
         Alert.alert("Дії з повідомленням", undefined, options);
     };
 
+    // Усі хуки — вище цього return
     if (room === null) {
         return (
             <View
@@ -327,10 +375,12 @@ export default function ChatRoomScreen() {
         !isRecording && !editingMessageId && !selectedImage && !inputText.trim() && !isSubmitting;
     const sendDisabled = (!inputText.trim() && !selectedImage) || isSubmitting;
     const bottomPadding = keyboardVisible ? 8 : Math.max(insets.bottom, 10);
+    const isInitialLoading =
+        status === "LoadingFirstPage" || currentUser === undefined || room === undefined;
 
     return (
         <KeyboardAvoidingView
-            className="flex-1"
+            className="flex-1 bg-background"
             behavior={Platform.OS === "ios" ? "padding" : "height"}
         >
             <View
@@ -373,7 +423,7 @@ export default function ChatRoomScreen() {
                 </TouchableOpacity>
             </View>
 
-            {messages === undefined || currentUser === undefined || room === undefined ? (
+            {isInitialLoading ? (
                 <View className="flex-1 justify-center items-center bg-background">
                     <ActivityIndicator size="large" color={COLORS.primary} />
                     <Text className="text-textMuted text-sm mt-3">Завантаження...</Text>
@@ -381,19 +431,32 @@ export default function ChatRoomScreen() {
             ) : (
                 <FlatList
                     ref={flatListRef}
-                    className="flex-1 bg-surface"
+                    className="flex-1 bg-background"
                     data={messages}
+                    inverted
                     keyExtractor={(item) => item._id}
                     contentContainerStyle={{
                         paddingHorizontal: 10,
-                        paddingTop: 10,
-                        paddingBottom: 8,
+                        paddingTop: 8,
+                        paddingBottom: 10,
                         flexGrow: 1,
                     }}
                     showsVerticalScrollIndicator={false}
                     keyboardShouldPersistTaps="handled"
+                    onEndReached={handleLoadMore}
+                    onEndReachedThreshold={0.4}
+                    ListFooterComponent={
+                        status === "LoadingMore" ? (
+                            <View className="py-4 items-center w-full">
+                                <ActivityIndicator size="small" color={COLORS.primary} />
+                            </View>
+                        ) : null
+                    }
                     ListEmptyComponent={
-                        <View className="flex-1 items-center justify-center px-10 py-20">
+                        <View
+                            className="flex-1 items-center justify-center px-10 py-20"
+                            style={{ transform: [{ scaleY: -1 }] }}
+                        >
                             <View className="w-16 h-16 rounded-full bg-surfaceLight items-center justify-center mb-4">
                                 <Ionicons name="chatbubble-ellipses-outline" size={28} color={COLORS.textMuted} />
                             </View>
@@ -408,8 +471,8 @@ export default function ChatRoomScreen() {
                     renderItem={({ item, index }) => {
                         const isOwn = item.senderId === currentUser?._id;
 
-                        const next = index < messages.length - 1 ? messages[index + 1] : null;
-                        const showAvatar = !isOwn && (!next || next.senderId !== item.senderId);
+                        const newer = index > 0 ? messages[index - 1] : null;
+                        const showAvatar = !isOwn && (!newer || newer.senderId !== item.senderId);
 
                         return (
                             <SwipeableMessageItem
@@ -433,7 +496,6 @@ export default function ChatRoomScreen() {
 
             {typingUsers && typingUsers.length > 0 && <TypingDots typingUsers={typingUsers} />}
 
-            {/* Нижняя зона */}
             <View className="bg-surface border-t border-surfaceLight">
                 {replyTarget && (
                     <ReplyPreviewBar replyTarget={replyTarget} onCancel={() => setReplyTarget(null)} />
@@ -472,7 +534,6 @@ export default function ChatRoomScreen() {
                 )}
 
                 {isRecording ? (
-                    /* Баннер активного запису замінює звичайну панель вводу */
                     <View className="flex-row items-center justify-between mx-3 my-2 bg-surfaceLight/60 px-4 py-2.5 rounded-2xl">
                         <View className="flex-row items-center gap-3">
                             <View className="w-3 h-3 rounded-full bg-red-500" />
@@ -564,9 +625,25 @@ export default function ChatRoomScreen() {
                                 )}
                             </TouchableOpacity>
                         )}
+
+                        <TouchableOpacity
+                            onPress={() => setIsVideoRecorderVisible(true)}
+                            disabled={isSubmitting || !!editingMessageId}
+                            className={`w-10 h-10 mb-0.5 items-center justify-center active:opacity-70 ${
+                                editingMessageId ? "opacity-40" : ""
+                            }`}
+                        >
+                            <Ionicons name="videocam-outline" size={24} color={COLORS.primary} />
+                        </TouchableOpacity>
                     </View>
                 )}
             </View>
+
+            <VideoNoteRecorder
+                visible={isVideoRecorderVisible}
+                onClose={() => setIsVideoRecorderVisible(false)}
+                onSendVideo={handleSendVideoNote}
+            />
 
             <ImageViewerModal
                 visible={!!fullscreenImage}

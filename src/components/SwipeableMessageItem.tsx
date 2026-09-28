@@ -16,6 +16,7 @@ import { VoiceMessagePlayer } from "./VoiceMessagePlayer";
 import { useState } from "react";
 import { ReactionPickerModal } from "./ReactionPickerModal";
 import { ReactionBadges } from "./ReactionBadges";
+import { VideoNotePlayer } from "./VideoNotePlayer";
 
 export interface MessageItemData {
     _id: Id<"messages">;
@@ -31,6 +32,9 @@ export interface MessageItemData {
     _creationTime: number;
     audioUrl?: string;
     audioDuration?: number;
+    videoUrl?: string;
+    videoDuration?: number;
+    isVideoNote?: boolean;
 }
 
 interface SwipeableMessageItemProps {
@@ -112,7 +116,7 @@ export const SwipeableMessageItem: React.FC<SwipeableMessageItemProps> = ({
         }
     };
 
-    
+
     const handleLongPress = () => setShowReactionPicker(true);
 
     const handleMoreActions = () => {
@@ -159,7 +163,16 @@ export const SwipeableMessageItem: React.FC<SwipeableMessageItemProps> = ({
                             </Text>
                         )}
 
-                        <View className={`items-end ${isOwn ? "flex-row-reverse" : "flex-row"}`}>
+                        {item.videoUrl && item.isVideoNote ? (
+                            <View className="my-1 items-center justify-center p-1">
+                                <VideoNotePlayer
+                                    videoUrl={item.videoUrl}
+                                    duration={item.videoDuration}
+                                    size={210}
+                                />
+                            </View>
+                        ) : (
+                            <View className={`items-end ${isOwn ? "flex-row-reverse" : "flex-row"}`}>
                             <Pressable
                                 onLongPress={handleLongPress}
                                 delayLongPress={250}
@@ -236,6 +249,8 @@ export const SwipeableMessageItem: React.FC<SwipeableMessageItemProps> = ({
                                 {metaLabel}
                             </Text>
                         </View>
+                        )}
+                        
                     </View>
                 </Animated.View>
             </GestureDetector>

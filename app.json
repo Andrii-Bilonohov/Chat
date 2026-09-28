@@ -10,7 +10,8 @@
     "ios": {
       "icon": "./assets/expo.icon",
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "Додатку Modern Chat потрібен доступ до вашого мікрофона для запису та надсилання голосових повідомлень."
+        "NSCameraUsageDescription": "Modern Chat потрібен доступ до камери для запису відеокружечків.",
+        "NSMicrophoneUsageDescription": "Modern Chat потрібен доступ до мікрофона для запису звуку у відеокружечках."
       }
     },
     "android": {
@@ -23,7 +24,11 @@
           "android.permission.RECORD_AUDIO"
         ]
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "web": {
       "output": "static",
@@ -45,6 +50,13 @@
         "expo-audio",
         {
           "microphonePermission": "Додатку Modern Chat потрібен доступ до вашого мікрофона для запису та надсилання голосових повідомлень."
+        }
+      ],
+      "expo-video",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Modern Chat потрібен доступ до камери для запису відеокружечків."
         }
       ]
     ],
